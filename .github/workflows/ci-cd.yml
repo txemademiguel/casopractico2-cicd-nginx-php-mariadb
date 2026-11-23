@@ -1,0 +1,78 @@
+name: CI/CD - Validacion Nginx, PHP y MariaDB
+
+on:
+  push:
+    branches: [ main, 'hu-**' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-db-connection:
+    name: 1. Pruebas PDO con Service Container MariaDB
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MARIADB_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.MARIADB_DATABASE }}
+          MYSQL_USER: ${{ secrets.MARIADB_USER }}
+          MYSQL_PASSWORD: ${{ secrets.MARIADB_PASSWORD }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+
+    steps:
+      - name: Descargar codigo del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar PHP con extension pdo_mysql
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_mysql
+
+      - name: Validar sintaxis de archivos PHP (Linter php -l)
+        run: find src/ -type f -name "*.php" -exec php -l {} \;
+
+      - name: Esperar disponibilidad de MariaDB (Healthcheck explicito)
+        run: |
+          echo "Esperando a que MariaDB complete la inicializacion en el puerto 3306..."
+          until docker exec $(docker ps -q --filter ancestor=mariadb:11.4) mariadb-admin ping -h 127.0.0.1 -u root -p"${{ secrets.MARIADB_ROOT_PASSWORD }}" --silent; do
+            echo "MariaDB no esta lista aun. Reintentando en 2 segundos..."
+            sleep 2
+          done
+          echo "MariaDB esta activa y lista para recibir conexiones."
+
+      - name: Ejecutar prueba de conexion a MariaDB (PDO)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_NAME: ${{ secrets.MARIADB_DATABASE }}
+          DB_USER: ${{ secrets.MARIADB_USER }}
+          DB_PASSWORD: ${{ secrets.MARIADB_PASSWORD }}
+        run: php src/db.php
+
+  build-docker:
+    name: 2. Build de Imagen Docker
+    needs: test-db-connection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar codigo del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Construir imagen Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: nginx-php-mariadb-app:test
