@@ -141,7 +141,7 @@ try {
                 ✔ <strong>Conexión exitosa a la Base de Datos MariaDB.</strong><br>
                 <small>Versión del SGBD: <?php echo htmlspecialchars($version); ?></small>
             </div>
-
+            <h1>Modidicado por Txema</h1>
             <h2>Listado de Productos Registrados</h2>
             
             <?php if (count($productos) > 0): ?>
